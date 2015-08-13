@@ -1,0 +1,117 @@
+#!/bin/bash
+begintime=`date +%s`
+
+# check the if root?
+userid=`id -u`
+if [ $userid -ne "0" ]; then
+        echo "you're not root?"
+        exit
+fi
+disk=/dev/mmcblk0
+if [ -e /dev/sda1 ];then
+update_disk=/dev/sda1
+else update_disk=/dev/mmcblk1p1
+fi
+dir_loc=/mnt/usb/update
+updateini=$dir_loc/update/update.ini
+logpath=${dir_loc}/
+starttime=$(date "+%Y%m%d_%H_%M")
+logfile="${logpath}log_${starttime}"
+touch ${logfile}
+
+ROOTFS=`grep ROOTFS $updateini |  cut -d= -f2`
+echo "ROOTFS=${ROOTFS}"
+rootfs_loc=${dir_loc}/update/${ROOTFS}
+
+#check images
+if [ ! -f ${rootfs_loc} ];then
+echo "No rootfs.tar.bz2 file,plese check you update images and update/update.ini "
+exit 0
+fi
+#end check images
+
+
+
+starttime=$(date "+%Y%m%d_%H_%M")
+touch ${logfile}
+
+#make some dir for mount
+echo 'make some dir for mount' 2>> ${logfile}
+rootmntpoint="/media/root"
+mkdir -p ${rootmntpoint} 2>>${logfile}
+#end make dir
+
+#mount patition
+echo '==========mount patition' 2>> ${logfile}
+mount ${disk}p2 ${rootmntpoint} 2>>${logfile}
+sync
+#end mount patition
+
+
+#del old rootfs
+echo 'clean old rootfs...'
+rm -rf ${rootmntpoint}/* 2>>${logfile}
+sync
+#copy root fs
+	echo '===========copy yocto root fs'
+	echo rootfs_loc:${rootfs_loc} >> ${logfile}
+	echo 'it will take five minutes, please wait....'
+        pv ${rootfs_loc} | tar -jxf - -C ${rootmntpoint} 2>>${logfile}
+	sleep 2
+	sync
+#end copy root fs
+
+#check if all file is ok
+echo "==================checking===================="
+
+if [ ! -d ${rootmntpoint}/etc ]; then
+	echo -e '\033[31m cp root fs error!!! \033[0m'
+	echo -e 'cp root fs error!!!' >> ${logfile}
+else
+	echo -e '\033[32m cp root fs success!!! \033[0m'
+	echo -e 'cp root fs success!!!' >> ${logfile}
+fi
+
+
+sleep 1
+sync
+echo 'if there no error, then make success!!!!!'
+echo "================end checking========================"
+#end check
+
+#umount all patition
+echo ================umount all patition >> ${logfile}
+	echo "unmount all partitions on "${disk} >> ${logfile}
+	for i in $(seq 16)
+	do
+        	if [ -e "${disk}p$i" ]
+        	then
+                	echo "${disk}$i" " exist" >> ${logfile}
+                	umount "${disk}p$i" 2>>${logfile}
+        	fi
+	done
+echo ================umount all patition end
+#end umount
+
+#delete all tmp file
+echo ====================delete all tmp file >> ${logfile}
+sync
+umount ${dir_loc} 2>>${logfile}
+umount ${rootmntpoint} 2>>${logfile}
+rmdir  ${rootmntpoint} ${dir_loc} 2>>${logfile}
+echo ====================delete all tmp file end
+#end delete
+
+#fsck filesystem
+echo 'running fsck...'
+#fsck.vfat ${disk}p1
+e2fsck ${disk}p2 -y
+sync
+
+endtime=`date +%s`
+duration=$(($endtime-$begintime))
+echo cost $duration in seconds
+echo cost $(($duration/60)) in minutes
+echo cost $(($duration/60)) in minutes >> ${logfile}
+echo cost $(($duration/3600)) in hours
+echo cost$(($duration/86400)) in days

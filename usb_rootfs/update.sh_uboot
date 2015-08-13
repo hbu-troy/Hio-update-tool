@@ -1,0 +1,39 @@
+#!/bin/bash
+begintime=`date +%s`
+
+# check the if root?
+userid=`id -u`
+if [ $userid -ne "0" ]; then
+        echo "you're not root?"
+        exit
+fi
+$dir_loc
+disk=/dev/mmcblk0
+if [ -e /dev/sda1 ];then
+update_disk=/dev/sda1
+else update_disk=/dev/mmcblk1p1
+fi
+dir_loc=/mnt/usb/update
+updateini=$dir_loc/update/update.ini
+logpath=${dir_loc}/
+starttime=$(date "+%Y%m%d_%H_%M")
+logfile="${logpath}log_${starttime}"
+touch ${logfile}
+
+UBOOT=`grep UBOOT $updateini |  cut -d= -f2`
+echo "UBOOT=${UBOOT}"
+
+uboot_loc=${dir_loc}/update/${UBOOT}
+#check images
+if [ ! -f ${uboot_loc} ];then
+echo " No uboot file,plese check you update images and update/update.ini "
+exit 0
+fi
+
+#flashing uboot
+echo "===========flash uboot"
+dd if=${uboot_loc} of=${disk} bs=512 seek=2 && echo '=======flash uboot end'
+sync
+umount ${dir_loc}
+exit 0
+#end flashing uboot

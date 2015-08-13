@@ -1,0 +1,239 @@
+#!/bin/bash
+begintime=`date +%s`
+# check the if root?
+userid=`id -u`
+if [ $userid -ne "0" ]; then
+        echo "you're not root?"
+        exit
+fi
+starttime=$(date "+%Y%m%d_%H_%M")
+dir_loc=/mnt/usb/update
+disk=/dev/mmcblk0
+if [ -e /dev/sda1 ];then
+update_disk=/dev/sda1
+else update_disk=/dev/mmcblk1p1
+fi
+
+updateini=$dir_loc/update/update.ini
+
+logpath=${dir_loc}/
+starttime=$(date "+%Y%m%d_%H_%M")
+logfile="${logpath}log_${starttime}"
+touch ${logfile}
+
+UBOOT=`grep UBOOT $updateini |  cut -d= -f2`
+DTB=`grep DTB $updateini |  cut -d= -f2`
+KERNEL=`grep KERNEL $updateini |  cut -d= -f2`
+ROOTFS=`grep ROOTFS $updateini |  cut -d= -f2`
+echo "UBOOT=${UBOOT} DTB=${DTB} KERNEL=${KERNEL} ROOTFS=${ROOTFS}"
+
+uboot_loc=${dir_loc}/update/${UBOOT}
+dtb_loc=${dir_loc}/update/${DTB}
+kernel_loc=${dir_loc}/update/${KERNEL}
+rootfs_loc=${dir_loc}/update/${ROOTFS}
+
+#check images
+if [ ! -f ${uboot_loc} ];then
+echo " No uboot file,plese check you update images and update/update.ini "
+exit 0
+fi
+
+if [ ! -f ${dtb_loc} ];then
+echo " No dtb file,plese check you update images and update/update.ini "
+exit 0
+fi
+
+if [ ! -f ${kernel_loc} ];then
+echo "No uImage file,plese check you update images and update/update.ini "
+exit 0
+fi
+
+if [ ! -f ${rootfs_loc} ];then
+echo "No rootfs.tar.bz2 file,plese check you update images and update/update.ini "
+exit 0
+fi
+#end check images
+
+# partition size in MB
+echo disk:$disk >> ${logfile}
+
+	echo "unmount all partitions on "${disk} >> ${logfile}
+	for i in $(seq 16)
+	do
+        	if [ -e "${disk}p$i" ]
+        	then
+                	echo "${disk}$i" " exist" >> ${logfile}
+                	umount "${disk}p$i" 2>>${logfile}
+        	fi
+	done
+
+total_size=`sfdisk -s ${disk}`
+total_size=`expr ${total_size} / 1024`
+boot_start=8
+total_size=`expr ${total_size} - ${boot_start}`
+OTHER=80
+BOOT_SIZE=20
+ROOT_SIZE=`expr $total_size - $BOOT_SIZE - $OTHER`
+
+seprate=40
+
+root_start=`expr ${boot_start} + ${BOOT_SIZE} + ${seprate}`
+echo boot_start:$boot_start >> ${logfile}
+echo BOOT_SIZE:$BOOT_SIZE >> ${logfile}
+echo root_start:$root_start >> ${logfile}
+echo ROOT_SIZE:$ROOT_SIZE >> ${logfile}
+
+# destroy the partition table
+echo 'destroy the partition table' >> ${logfile}
+dd if=/dev/zero of=${disk} bs=1024 count=1 2>>${logfile}
+
+sfdisk --force -uM ${disk} << EOF
+${boot_start},${BOOT_SIZE},b
+${root_start},${ROOT_SIZE},83
+EOF
+sync
+#end create partition table
+
+#formating partition
+echo 'formating partition'
+mkfs.vfat ${disk}p1 -nkernel 2>>${logfile}
+mkfs.ext2 ${disk}p2 -Lroot 2>>${logfile}
+sync
+#end formating partition
+
+	echo "unmount all partitions on "${disk} >> ${logfile}
+	for i in $(seq 16)
+	do
+        	if [ -e "${disk}p$i" ]
+        	then
+                	echo "${disk}$i" " exist" >> ${logfile}
+                	umount "${disk}p$i" 2>>${logfile}
+        	fi
+	done
+
+#make some dir for mount
+echo 'make some dir for mount' >> ${logfile}
+kernelmntpoint="/media/kernel"
+rootmntpoint="/media/root"
+mkdir -p ${kernelmntpoint} 2>>${logfile}
+mkdir -p ${rootmntpoint} 2>>${logfile}
+#end make dir
+
+#mount patition
+echo '==========mount patition' >> ${logfile}
+mount ${disk}p1 ${kernelmntpoint} 2>>${logfile}
+mount ${disk}p2 ${rootmntpoint} 2>>${logfile}
+sync
+#end mount patition
+
+#flashing uboot
+if [ -f ${uboot_loc} ]; then
+	echo "===========flash uboot"
+	dd if=${uboot_loc} of=${disk} bs=512 seek=2 2>>${logfile}
+	sync
+else 
+umount ${kernelmntpoint}
+umount ${rootmntpoint}
+umount ${dir_loc}
+exit 0
+fi
+#end flashing uboot
+
+#copy kernel image
+	echo '===========copy kernel image'
+	echo kernel_loc:${kernel_loc} >> ${logfile}
+	cp ${kernel_loc} ${kernelmntpoint}/uImage 2>>${logfile}
+	sync
+	sleep 1
+	echo =============copy kernel image end
+#end copy kernel image
+
+#begin copy dtb
+	echo '===========copy dtb'
+	echo dtb_loc:${dtb_loc} >> ${logfile}
+	cp ${dtb_loc} ${kernelmntpoint}/ 2>>${logfile}
+	sync
+	sleep 1
+	echo =============copy dtb end
+#end copy dtb 
+
+#copy root fs
+	echo '===========copy yocto root fs'
+	echo rootfs_loc:${rootfs_loc} >> ${logfile}
+	echo 'it will take five minutes, please wait....'
+        pv ${rootfs_loc} | tar -jxf - -C ${rootmntpoint} 2>>${logfile}
+	sleep 2
+	sync
+#end copy root fs
+
+#check if all file is ok
+echo "==================checking===================="
+if [ ! -f ${kernelmntpoint}/${DTB} ] ; then
+	echo -e '\033[31m cp dtb file error!!! \033[0m'
+	echo -e 'cp dtb file error!!!' >> ${logfile}
+else
+	echo -e '\033[32m cp dtb file success!!! \033[0m'
+	echo -e 'cp dtb file success!!!' >> ${logfile}
+fi
+
+if [ ! -f ${kernelmntpoint}/uImage ]; then
+	echo -e '\033[31m cp uImage error!!! \033[0m'
+	echo -e 'cp uImage error!!!' >> ${logfile}
+else
+	echo -e '\033[32m cp uImage success!!! \033[0m'
+	echo -e 'cp uImage success!!!' >> ${logfile}
+fi
+
+if [ ! -d ${rootmntpoint}/etc ]; then
+	echo -e '\033[31m cp root fs error!!! \033[0m'
+	echo -e 'cp root fs error!!!' >> ${logfile}
+else
+	echo -e '\033[32m cp root fs success!!! \033[0m'
+	echo -e 'cp root fs success!!!' >> ${logfile}
+fi
+
+
+sleep 1
+sync
+echo 'if there no error, then make success!!!!!'
+echo "================end checking========================"
+#end check
+
+#umount all patition
+echo ================umount all patition >> ${logfile}
+	echo "unmount all partitions on "${disk} >> ${logfile}
+	for i in $(seq 16)
+	do
+        	if [ -e "${disk}p$i" ]
+        	then
+                	echo "${disk}$i" " exist" >> ${logfile}
+                	umount "${disk}p$i" 2>>${logfile}
+        	fi
+	done
+echo ================umount all patition end
+#end umount
+
+#delete all tmp file
+echo ====================delete all tmp file >> ${logfile}
+sync
+umount ${kernelmntpoint} 2>>${logfile}
+umount ${rootmntpoint} 2>>${logfile}
+umount ${dir_loc} 2>>${logfile}
+rmdir ${kernelmntpoint} ${rootmntpoint} ${dir_loc} 2>>${logfile}
+echo ====================delete all tmp file end
+#end delete
+
+#fsck filesystem
+echo 'running fsck...'
+#fsck.vfat ${disk}p1
+e2fsck ${disk}p2 -y
+
+
+
+endtime=`date +%s`
+duration=$(($endtime-$begintime))
+echo cost $duration in seconds
+echo cost $(($duration/60)) in minutes
+echo cost $(($duration/60)) in minutes >> ${logfile}
+echo cost $(($duration/3600)) in hours
+echo cost$(($duration/86400)) in days

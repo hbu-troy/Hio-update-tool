@@ -1,0 +1,151 @@
+#!/bin/bash
+begintime=`date +%s`
+
+# check the if root?
+userid=`id -u`
+if [ $userid -ne "0" ]; then
+        echo "you're not root?"
+        exit
+fi
+$dir_loc
+disk=/dev/mmcblk0
+if [ -e /dev/sda1 ];then
+update_disk=/dev/sda1
+else update_disk=/dev/mmcblk1p1
+fi
+dir_loc=/mnt/usb/update
+updateini=$dir_loc/update/update.ini
+logpath=${dir_loc}/
+starttime=$(date "+%Y%m%d_%H_%M")
+logfile="${logpath}log_${starttime}"
+touch ${logfile}
+
+UBOOT=`grep UBOOT $updateini |  cut -d= -f2`
+DTB=`grep DTB $updateini |  cut -d= -f2`
+KERNEL=`grep KERNEL $updateini |  cut -d= -f2`
+echo "UBOOT=${UBOOT} DTB=${DTB} KERNEL=${KERNEL}"
+
+uboot_loc=${dir_loc}/update/${UBOOT}
+dtb_loc=${dir_loc}/update/${DTB}
+kernel_loc=${dir_loc}/update/${KERNEL}
+#check images
+if [ ! -f ${uboot_loc} ];then
+echo " No uboot file,plese check you update images and update/update.ini "
+exit 0
+fi
+
+if [ ! -f ${dtb_loc} ];then
+echo " No dtb file,plese check you update images and update/update.ini "
+exit 0
+fi
+
+if [ ! -f ${kernel_loc} ];then
+echo "No uImage file,plese check you update images and update/update.ini "
+exit 0
+fi
+#end check image
+starttime=$(date "+%Y%m%d_%H_%M")
+touch ${logfile}
+
+
+#make some dir for mount
+echo 'make some dir for mount' >> ${logfile}
+kernelmntpoint="/media/kernel"
+mkdir -p ${kernelmntpoint} 2>>${logfile}
+#end make dir
+
+#mount patition
+echo '==========mount patition' >> ${logfile}
+mount ${disk}p1 ${kernelmntpoint} 2>>${logfile}
+sync
+#end mount patition
+
+#flashing uboot
+if [ -f ${uboot_loc} ]; then
+	echo "===========flash uboot"
+#	dd if=/dev/zero of=${disk} bs=512 seek=2 skip=2 count=1536 conv=fsync conv=notrunc 2>>${logfile}
+	dd if=${uboot_loc} of=${disk} bs=512 seek=2 2>>${logfile}
+	sync
+else 
+umount ${kernelmntpoint}
+umount $dir_loc
+exit 0
+fi
+#end flashing uboot
+
+#del old kernel
+rm -rf ${kernelmntpoint}/* 2>>${logfile}
+
+#copy kernel image
+	echo '===========copy kernel image'
+	echo kernel_loc:${kernel_loc} >> ${logfile}
+	cp ${kernel_loc} ${kernelmntpoint}/uImage 2>>${logfile}
+	sync
+	sleep 1
+	echo =============copy kernel image end
+#end copy kernel image
+
+#begin copy dtb
+	echo '===========copy dtb'
+	echo dtb_loc:${dtb_loc} >> ${logfile}
+	cp ${dtb_loc} ${kernelmntpoint}/ 2>>${logfile}
+	sync
+	sleep 1
+	echo =============copy dtb end
+#end copy dtb 
+
+
+#check if all file is ok
+echo "==================checking===================="
+if [ ! -f ${kernelmntpoint}/${DTB} ] ; then
+	echo -e '\033[31m cp dtb file error!!! \033[0m'
+	echo -e 'cp dtb file error!!!' >> ${logfile}
+else
+	echo -e '\033[32m cp dtb file success!!! \033[0m'
+	echo -e 'cp dtb file success!!!' >> ${logfile}
+fi
+
+if [ ! -f ${kernelmntpoint}/uImage ]; then
+	echo -e '\033[31m cp uImage error!!! \033[0m'
+	echo -e 'cp uImage error!!!' >> ${logfile}
+else
+	echo -e '\033[32m cp uImage success!!! \033[0m'
+	echo -e 'cp uImage success!!!' >> ${logfile}
+fi
+
+sleep 1
+sync
+echo 'if there no error, then make success!!!!!'
+echo "================end checking========================"
+#end check
+
+#umount all patition
+echo ================umount all patition >> ${logfile}
+	echo "unmount all partitions on "${disk} >> ${logfile}
+	for i in $(seq 16)
+	do
+        	if [ -e "${disk}p$i" ]
+        	then
+                	echo "${disk}$i" " exist" >> ${logfile}
+                	umount "${disk}p$i" 2>>${logfile}
+        	fi
+	done
+echo ================umount all patition end
+#end umount
+
+#delete all tmp file
+echo ====================delete all tmp file >> ${logfile}
+sync
+umount ${dir_loc} 2>>${logfile}
+umount ${kernelmntpoint} 2>>${logfile}
+rmdir ${kernelmntpoint}  ${dir_loc} 2>>${logfile}
+echo ====================delete all tmp file end
+#end delete
+
+endtime=`date +%s`
+duration=$(($endtime-$begintime))
+echo cost $duration in seconds
+echo cost $(($duration/60)) in minutes
+echo cost $(($duration/60)) in minutes >> ${logfile}
+echo cost $(($duration/3600)) in hours
+echo cost$(($duration/86400)) in days

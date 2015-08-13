@@ -1,0 +1,6 @@
+;;this file if the configure of update image
+[RRI_V2.0]
+	uboot=u-boot.imx
+	dtb=imx6dl-sabresd_THIN_BOX_2015031611.dtb
+	uimage=uImage_THIN_BOX_2015031611
+	rootfs=thin_box_rootfs.tar.bz2
